@@ -36,21 +36,46 @@ class Schedule:
             self.bases[idx].opt_by_optimism(optimism)
 
     def opt_by_gradient(self, env: Environment):
-        """Optimize by the gradient for all base-learners.
+        """Optimize by the gradient for all base-learners (vectorized).
+
+        Stacks all active base-learner decisions into a matrix and performs the
+        OGD update and Ball projection in a single set of NumPy matrix ops,
+        avoiding a Python loop over N experts.  Falls back to per-learner calls
+        for domains that do not implement ``project_batch``.
 
         Args:
             env (Environment): Environment at current round.
 
         Returns:
             tuple: tuple contains:
-                loss (float): the origin loss of all alive base-learners. \n
-                surrogate_loss (float): the surrogate loss of all alive base-learners.
+                loss (numpy.ndarray): the origin loss of all alive base-learners. \n
+                surrogate_loss (numpy.ndarray): the surrogate loss of all alive base-learners.
         """
-        loss = np.zeros(len(self.active_index))
-        surrogate_loss = np.zeros_like(loss)
+        n = len(self.active_index)
+        loss = np.zeros(n)
+        surrogate_loss = np.zeros(n)
+
+        X = self.x_active_bases                          # (N, d) current decisions
+        loss_arr, surrogate_loss_arr = env.get_loss_batch(X)
+        loss[:] = loss_arr
+        if surrogate_loss_arr is not None:
+            surrogate_loss[:] = surrogate_loss_arr
+
+        grads = env.get_grad_batch(X)                    # (N, d)
+        step_sizes = np.array([self.bases[idx].get_step_size()
+                                for idx in self.active_index])   # (N,)
+        X_new = X - step_sizes[:, None] * grads          # (N, d) vectorized update
+
+        domain = self.bases[self.active_index[0]].domain
+        if hasattr(domain, 'project_batch'):
+            X_new = domain.project_batch(X_new)
+        else:
+            X_new = np.array([domain.project(x) for x in X_new])
+
         for i, idx in enumerate(self.active_index):
-            _, loss[i], surrogate_loss[i] = self.bases[idx].opt_by_gradient(
-                env)
+            self.bases[idx].x = X_new[i]
+            self.bases[idx].t += 1
+
         return loss, surrogate_loss
 
     @property

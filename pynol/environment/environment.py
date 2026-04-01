@@ -86,6 +86,49 @@ class Environment:
             x) if self.surrogate_func else None
         return loss, surrogate_loss
 
+    def get_loss_batch(self, X: np.ndarray):
+        """Get losses for a batch of decisions X of shape (N, d).
+
+        Args:
+            X (numpy.ndarray): Matrix of decisions, shape (N, d).
+
+        Returns:
+            tuple: (losses, surrogate_losses), each of shape (N,), surrogate_losses
+                is None if no surrogate function is set.
+        """
+        losses = np.array([self.func(x) for x in X])
+        surrogate_losses = (np.array([self.surrogate_func(x) for x in X])
+                            if self.surrogate_func is not None else None)
+        return losses, surrogate_losses
+
+    def get_grad_batch(self, X: np.ndarray) -> np.ndarray:
+        """Get gradients for a batch of decisions X of shape (N, d).
+
+        When the gradient is constant (linear surrogate or shared gradient), a
+        single broadcast is returned avoiding N separate gradient evaluations.
+
+        Args:
+            X (numpy.ndarray): Matrix of decisions, shape (N, d).
+
+        Returns:
+            numpy.ndarray: Gradient matrix of shape (N, d).
+        """
+        if self.use_surrogate_grad:
+            if self.surrogate_grad is not None:
+                return np.broadcast_to(self.surrogate_grad, X.shape).copy()
+            elif self.surrogate_grad_func is not None:
+                return np.array([self.surrogate_grad_func(x) for x in X])
+            elif self.surrogate_func is not None:
+                self.surrogate_grad_func = grad_solver(self.surrogate_func)
+                return np.array([self.surrogate_grad_func(x) for x in X])
+        if self.grad is not None:
+            return np.broadcast_to(self.grad, X.shape).copy()
+        elif self.grad_func is not None:
+            return np.array([self.grad_func(x) for x in X])
+        else:
+            self.grad_func = grad_solver(self.func)
+            return np.array([self.grad_func(x) for x in X])
+
     def get_grad(self, x: np.ndarray):
         """Get the gradient of the decision :math:`x`.
 

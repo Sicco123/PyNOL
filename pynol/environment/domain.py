@@ -108,6 +108,20 @@ class Ball(Domain):
             x = self.center + (x - self.center) * self.r / distance
         return x
 
+    def project_batch(self, X: np.ndarray) -> np.ndarray:
+        """Project a batch of decisions onto the ball (vectorized).
+
+        Args:
+            X (numpy.ndarray): Matrix of shape (N, d) to project.
+
+        Returns:
+            numpy.ndarray: Projected matrix of shape (N, d).
+        """
+        diffs = X - self.center
+        norms = np.linalg.norm(diffs, axis=1)
+        scale = np.where(norms > self.r, self.r / norms, 1.0)
+        return self.center + diffs * scale[:, None]
+
     def __mul__(self, scale: float):
         new_ball = deepcopy(self)
         new_ball.radius *= scale
